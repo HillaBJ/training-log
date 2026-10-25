@@ -1,6 +1,6 @@
 {
-  "name": "Full-Body Training Log",
-  "short_name": "Training Log",
+  "name": "My Training",
+  "short_name": "My Training",
   "description": "Personal 6-week training log that works offline.",
   "start_url": "./",
   "scope": "./",
