@@ -2,7 +2,7 @@
 // Online: every request goes to the network first (bypassing the browser's HTTP cache), so a new
 // version you publish shows up the next time the app opens. Offline or on a very slow connection:
 // the last saved copy is used. Bump CACHE when you publish a change so old files are cleared.
-const CACHE = "training-log-v3";
+const CACHE = "training-log-v4";
 const NETWORK_TIMEOUT_MS = 4000;
 const FILES = [
   "./", "index.html", "manifest.webmanifest",

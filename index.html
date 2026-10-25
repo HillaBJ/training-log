@@ -98,6 +98,15 @@ tr.daterow td { font-weight: 600; }
 .structctl button, .structctl select { font: 500 13px var(--font-body); padding: 5px 10px; border-radius: 6px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); cursor: pointer; }
 .structctl button:disabled { opacity: .35; cursor: default; }
 .structctl .danger { color: var(--warn); margin-left: auto; }
+.dragh { display: inline-flex; align-items: center; justify-content: center; min-width: 44px; min-height: 36px; margin: -6px -6px -6px 0; touch-action: none; user-select: none; -webkit-user-select: none; cursor: grab; color: var(--muted); font-size: 26px; letter-spacing: -3px; border-radius: 6px; }
+.dragh:hover { background: var(--bg); }
+.ex.compact .exhead { flex-wrap: nowrap; align-items: center; }
+.ex.compact .exname { flex: 1; min-width: 0; }
+.dragh { flex: none; }
+.dragging { position: relative; z-index: 8; box-shadow: 0 8px 22px rgba(0,0,0,.22); transition: none !important; cursor: grabbing; }
+.ss, .ex.compact { transition: transform .16s ease; }
+.dropline { position: fixed; height: 3px; border-radius: 2px; background: var(--accent); z-index: 20; pointer-events: none; }
+body.is-dragging { user-select: none; -webkit-user-select: none; cursor: grabbing; }
 .editform select { width: 100%; font: 500 15px var(--font-body); padding: 7px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--ink); }
 .addbtn { font: 600 13px var(--font-body); padding: 9px 12px; border-radius: 8px; border: 1px dashed var(--c, var(--accent)); background: transparent; color: var(--c, var(--accent)); cursor: pointer; text-align: left; }
 .removedrow { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding-block: 6px; border-top: 1px solid var(--line); }
@@ -283,7 +292,7 @@ const WU = Object.fromEntries(WARMUP.flatMap(b => b.items).map(w => [w.id, w]));
 const byId = Object.fromEntries(ALL.map(e => [e.id, e]));
 
 const store = { log: {}, sessions: {}, custom: {} };
-let editing = null, structMode = false;
+let editing = null, structMode = false, removedOpen = false;
 const openEx = new Set();
 const cust = id => store.custom[id] || {};
 const exOf = id => {
@@ -394,15 +403,13 @@ function renderWorkout(w) {
   html += `<div class="structbar">${structMode ? "" : `<button class="plain" id="openall-${w}" data-openall="${allOpen ? "close" : "open"}">${allOpen ? "Close all" : "Open all"}</button>`}<button id="struct-${w}" data-struct="1" aria-pressed="${structMode}">${structMode ? "Done editing structure" : "Edit superset structure"}</button>${structMode ? `<span class="notes">Move, reorder, remove or add exercises. Your logged sets stay with each exercise.</span>` : ""}</div>`;
   L.blocks.forEach((ids, bi) => {
     const items = ids.map(exOf), multi = items.length > 1;
-    html += `<section class="ss s${bi % 4 + 1}"><div class="sshead"><h2>${multi ? "Superset " + (bi + 1) : "Block " + (bi + 1)}</h2><span class="flow">${multi ? items.map((_, ii) => codeOf(bi, ii, true)).join(" → ") + ", repeat" : "On its own"}</span>
-      ${structMode ? `<span class="structctl" data-bi="${bi}"><button data-ssmv="up" aria-label="Move superset up" ${bi === 0 ? "disabled" : ""}>↑</button><button data-ssmv="down" aria-label="Move superset down" ${bi === L.blocks.length - 1 ? "disabled" : ""}>↓</button></span>` : ""}</div>`;
+    html += `<section class="ss s${bi % 4 + 1}" data-bi="${bi}"><div class="sshead"><h2>${multi ? "Superset " + (bi + 1) : "Block " + (bi + 1)}</h2><span class="flow">${multi ? items.map((_, ii) => codeOf(bi, ii, true)).join(" → ") + ", repeat" : "On its own"}</span>
+      ${structMode ? `<span class="dragh" id="drag-ss-${bi}" data-dragss="${bi}" role="button" aria-label="Drag to reorder superset">⋮⋮</span>` : ""}</div>`;
     items.forEach((ex, ii) => {
       const code = codeOf(bi, ii, multi);
       if (structMode && editing !== ex.id) {
-        html += `<article class="ex compact"><div class="exhead"><span class="exname"><span class="code">${code}</span>${esc(nameOf(ex))}</span></div>
+        html += `<article class="ex compact" data-bi="${bi}" data-ii="${ii}"><div class="exhead"><span class="exname"><span class="code">${code}</span>${esc(nameOf(ex))}</span><span class="dragh" id="drag-ex-${ex.id}" data-dragex="${ex.id}" role="button" aria-label="Drag to reorder exercise">⋮⋮</span></div>
           <div class="structctl" data-sx="${ex.id}" data-bi="${bi}" data-ii="${ii}">
-            <button data-mv="up" aria-label="Move up" ${ii === 0 ? "disabled" : ""}>↑</button>
-            <button data-mv="down" aria-label="Move down" ${ii === items.length - 1 ? "disabled" : ""}>↓</button>
             <select id="moveto-${ex.id}" data-moveto="1" aria-label="Move to another superset"><option value="">Move to…</option>${L.blocks.map((_, j) => j === bi ? "" : `<option value="${j}">${L.blocks[j].length > 1 ? "Superset" : "Block"} ${j + 1}</option>`).join("")}<option value="new">New superset</option></select>
             <button data-mv="remove" class="danger">Remove</button>
           </div></article>`;
@@ -437,7 +444,7 @@ function renderWorkout(w) {
   });
   if (structMode) {
     html += `<button class="addbtn" id="add-${w}-new" data-addto="new">+ New superset</button>`;
-    if (L.removed.length) html += `<section class="session"><h2>Removed exercises</h2>${L.removed.map(id => `<div class="removedrow"><span>${esc(nameOf(exOf(id)))}</span><button class="editbtn" id="restore-${id}" data-restore="${id}">Put back</button></div>`).join("")}</section>`;
+    if (L.removed.length) html += `<section class="session"><button class="exhead toggle" id="removed-toggle-${w}" data-rtoggle="1" aria-expanded="${removedOpen}"><span class="exname">Removed exercises <span class="prog">${L.removed.length}</span></span><span class="chev" aria-hidden="true">▾</span></button>${removedOpen ? L.removed.map(id => `<div class="removedrow"><span>${esc(nameOf(exOf(id)))}</span><button class="editbtn" id="restore-${id}" data-restore="${id}">Put back</button></div>`).join("") : ""}</section>`;
   }
   const p = ses.pain;
   html += `<section class="session"><h2>Knee check · after the workout</h2>
@@ -663,18 +670,13 @@ view.addEventListener("click", e => {
   const oa = e.target.closest("[data-openall]");
   if (oa) { const ids = layoutOf(ui.tab).blocks.flat(); ids.forEach(id => oa.dataset.openall === "open" ? openEx.add(id) : openEx.delete(id)); render(); return; }
   const sb = e.target.closest("[data-struct]");
-  if (sb) { structMode = !structMode; editing = null; render(); return; }
-  const mv = e.target.closest("[data-mv]"), ssmv = e.target.closest("[data-ssmv]");
-  if (mv || ssmv) {
-    const L = layoutOf(ui.tab), ctl = (mv || ssmv).closest(".structctl"), bi = +ctl.dataset.bi;
-    if (ssmv) {
-      const j = ssmv.dataset.ssmv === "up" ? bi - 1 : bi + 1;
-      if (j >= 0 && j < L.blocks.length) [L.blocks[bi], L.blocks[j]] = [L.blocks[j], L.blocks[bi]];
-    } else {
-      const b = L.blocks[bi], ii = +ctl.dataset.ii;
-      if (mv.dataset.mv === "remove") L.removed.push(...b.splice(ii, 1));
-      else { const j = mv.dataset.mv === "up" ? ii - 1 : ii + 1; if (j >= 0 && j < b.length) [b[ii], b[j]] = [b[j], b[ii]]; }
-    }
+  if (sb) { structMode = !structMode; editing = null; removedOpen = false; render(); return; }
+  const rt = e.target.closest("[data-rtoggle]");
+  if (rt) { removedOpen = !removedOpen; render(); return; }
+  const rm = e.target.closest("[data-mv]");
+  if (rm) {
+    const L = layoutOf(ui.tab), ctl = rm.closest(".structctl");
+    L.removed.push(...L.blocks[+ctl.dataset.bi].splice(+ctl.dataset.ii, 1));
     saveLayout(ui.tab, L); render(); return;
   }
   const add = e.target.closest("[data-addto]");
@@ -753,6 +755,82 @@ view.addEventListener("click", e => {
     render();
   }
 });
+
+// ---------- drag to reorder (structure mode) ----------
+// A superset slides between the others; an exercise shows a blue line where it will land.
+function startDrag(h, e) {
+  if (e.pointerType === "mouse" && e.button !== 0) return;
+  e.preventDefault();
+  const isSs = h.hasAttribute("data-dragss");
+  const L = layoutOf(ui.tab);
+  const card = h.closest(isSs ? ".ss" : "article.ex");
+  const origBi = +card.dataset.bi, origIi = +card.dataset.ii;
+  const sections = [...view.querySelectorAll(":scope > .ss")];
+  const startPageY = e.clientY + window.scrollY;
+  let clientY = e.clientY, dy = 0, moved = false, raf = 0, commit = null, line = null;
+  const top = sections.map(s => s.getBoundingClientRect().top + window.scrollY);
+  const ht = sections.map(s => s.getBoundingClientRect().height);
+  const gap = sections.length > 1 ? top[1] - top[0] - ht[0] : 0;
+
+  const update = () => {
+    dy = clientY + window.scrollY - startPageY;
+    if (Math.abs(dy) > 6) moved = true;
+    if (isSs) {
+      dy = Math.max(top[0] - top[origBi], Math.min(top[top.length - 1] + ht[ht.length - 1] - top[origBi] - ht[origBi], dy));
+      card.style.transform = `translateY(${dy}px)`;
+      const mid = top[origBi] + ht[origBi] / 2 + dy;
+      const others = sections.map((_, j) => j).filter(j => j !== origBi);
+      const t = others.filter(j => top[j] + ht[j] / 2 < mid).length;
+      const seq = others.slice(); seq.splice(t, 0, origBi);
+      let y = top[0];
+      seq.forEach(j => { if (j !== origBi) sections[j].style.transform = `translateY(${y - top[j]}px)`; y += ht[j] + gap; });
+      commit = () => { if (t === origBi) return false; const [b] = L.blocks.splice(origBi, 1); L.blocks.splice(t, 0, b); return true; };
+      return;
+    }
+    card.style.transform = `translateY(${dy}px)`;
+    const r = card.getBoundingClientRect(), cy = r.top + r.height / 2;
+    const slots = [{ noop: true, y: cy - dy }];
+    sections.forEach((sec, bi) => {
+      const arts = [...sec.querySelectorAll("article.ex.compact")].filter(a => a !== card);
+      if (!arts.length) return;
+      const rects = arts.map(a => a.getBoundingClientRect()), sr = sec.getBoundingClientRect();
+      arts.forEach((a, k) => slots.push({ bi, p: +a.dataset.ii, y: k === 0 ? rects[0].top - 5 : (rects[k - 1].bottom + rects[k].top) / 2, x: sr.left, w: sr.width }));
+      const last = arts.length - 1;
+      slots.push({ bi, p: +arts[last].dataset.ii + 1, y: rects[last].bottom + 5, x: sr.left, w: sr.width });
+    });
+    let best = slots[0];
+    slots.forEach(s => { if (Math.abs(s.y - cy) < Math.abs(best.y - cy)) best = s; });
+    if (!line) { line = document.createElement("div"); line.className = "dropline"; document.body.appendChild(line); }
+    line.style.display = best.noop ? "none" : "block";
+    if (!best.noop) { line.style.left = best.x + "px"; line.style.width = best.w + "px"; line.style.top = (best.y - 1.5) + "px"; }
+    commit = () => {
+      if (best.noop) return false;
+      const id = L.blocks[origBi].splice(origIi, 1)[0];
+      let p = best.p; if (best.bi === origBi && origIi < p) p--;
+      L.blocks[best.bi].splice(p, 0, id);
+      return true;
+    };
+  };
+  const tick = () => {
+    const s = clientY < 90 ? -12 : clientY > window.innerHeight - 90 ? 12 : 0;
+    if (s) { window.scrollBy(0, s); update(); }
+    raf = requestAnimationFrame(tick);
+  };
+  const cleanup = () => {
+    cancelAnimationFrame(raf); if (line) line.remove();
+    card.classList.remove("dragging"); document.body.classList.remove("is-dragging");
+    card.style.transform = ""; sections.forEach(s => { s.style.transform = ""; });
+    h.removeEventListener("pointermove", onMove); h.removeEventListener("pointerup", onUp); h.removeEventListener("pointercancel", cleanup);
+  };
+  const onMove = ev => { clientY = ev.clientY; update(); };
+  const onUp = () => { const ok = moved && commit && commit(); cleanup(); if (ok) { saveLayout(ui.tab, L); render(); } };
+  h.setPointerCapture(e.pointerId);
+  card.classList.add("dragging"); document.body.classList.add("is-dragging");
+  h.addEventListener("pointermove", onMove); h.addEventListener("pointerup", onUp); h.addEventListener("pointercancel", cleanup);
+  raf = requestAnimationFrame(tick);
+}
+view.addEventListener("pointerdown", e => { const h = e.target.closest("[data-dragss],[data-dragex]"); if (h) startDrag(h, e); });
+view.addEventListener("contextmenu", e => { if (e.target.closest(".dragh")) e.preventDefault(); });
 
 // ---------- boot ----------
 try { const s = JSON.parse(localStorage.getItem(STORE_KEY) || "null"); if (s) { store.log = s.log || {}; store.sessions = s.sessions || {}; store.custom = s.custom || {}; } } catch (e) {}
